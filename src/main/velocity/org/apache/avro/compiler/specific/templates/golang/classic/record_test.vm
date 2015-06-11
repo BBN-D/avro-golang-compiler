@@ -1,0 +1,186 @@
+##
+## Copyright (c) 2014 Raytheon BBN Technologies Corp
+##
+## Licensed under the Apache License, Version 2.0 (the "License");
+## you may not use this file except in compliance with the License.
+## You may obtain a copy of the License at
+##
+##   http://www.apache.org/licenses/LICENSE-2.0
+##
+## Unless required by applicable law or agreed to in writing, software
+## distributed under the License is distributed on an "AS IS" BASIS,
+## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## See the License for the specific language governing permissions and
+## limitations under the License.
+##
+package ${this.golangPackageName($schema)};
+
+import (
+	"math/rand"
+	"encoding/json"
+	"reflect"
+	"testing"
+)
+
+#set( $imports = $this.getTestImports($schema) )
+#if ($imports.size() > 0)
+import (
+#foreach ($import in $imports)
+	"$import"
+#end
+)
+
+#end
+// ignore import errors
+var _ = rand.Intn(4)
+
+func roundTrip${this.mangle($schema.getName())}(t *testing.T, original *${this.mangle($schema.getName())}, pass string) (*${this.mangle($schema.getName())}) {
+
+	bytes, err := original.ToAvroContainer()
+	if err != nil {
+		t.Fatal("Error serializing ${this.mangle($schema.getName())} (" + pass + "): " + err.Error())
+	}
+	
+	cloned, err := ${this.mangle($schema.getName())}FromAvroContainer(bytes)
+	if err != nil {
+		t.Fatal("Error deserializing ${this.mangle($schema.getName())} (" + pass + "): " + err.Error())
+	}
+	
+	// compare the json output
+	originalJson, _ := json.Marshal(original)
+	clonedJson, _ := json.Marshal(cloned[0])
+	
+	if !reflect.DeepEqual(originalJson, clonedJson) {
+		t.Logf("Original: %s", string(originalJson))
+		t.Logf("Cloned:   %s", string(clonedJson))
+		t.Fatal("Cloned  ${this.mangle($schema.getName())} is not equivalent to original (" + pass + ")")
+	}
+
+	return cloned[0].(*${this.mangle($schema.getName())})
+}
+
+## Adds whitespace
+#macro( wrap_create_record $fieldSchema $assignTo $tmp $inUnion )
+$this.addPrefix("	", "#create_record($fieldSchema, $assignTo, $tmp, $inUnion)")
+#end
+##
+## Recursive macro
+##
+#macro( create_record $fieldSchema $assignTo $tmp $inUnion )
+##
+## $macro is only needed for things used after a recursive call
+##
+#set( $recordType = ${this.golangType($schema, $fieldSchema)} )
+#set( $macro.fieldSchema = $fieldSchema )
+#set( $macro.assignTo = $assignTo )
+#set( $macro.tmp = ${tmp} )
+#set( $macro.inUnion = $inUnion )
+##
+#if( $fieldSchema.getType() == $RECORD )
+	${macro.tmp} := new($recordType)
+	
+#foreach ($field in $fieldSchema.getFields())
+#set( $macro.nextAssignTo = "${macro.tmp}.${this.generateFieldName($field, $schema)}" )
+#set( $macro.nextTmp = "${macro.tmp}_${field.name()}" )
+#create_record($field.schema(), $macro.nextAssignTo, $macro.nextTmp, false )
+#end
+
+	$macro.assignTo = $macro.tmp
+
+#elseif( $fieldSchema.getType() == $ARRAY )
+	// a quirk in avro encoding means round trip isn't possible for zero-length arrays
+	${macro.tmp}_len := rand.Intn(4) + 1
+#if( $inUnion )
+	${macro.tmp}_array := make([]interface{} , ${tmp}_len)
+#else
+	${macro.tmp}_array := make([]${this.golangTypeDecl($schema, $fieldSchema.getElementType())} , ${tmp}_len)
+#end
+	
+	for ${macro.tmp}_i := 0; ${macro.tmp}_i < len(${macro.tmp}_array); ${macro.tmp}_i++ {
+
+#set( $macro.nextAssignTo = "${macro.tmp}_array[${macro.tmp}_i]" )
+#set( $macro.nextTmp = "${macro.tmp}_${fieldSchema.getElementType().getName()}" )
+#wrap_create_record($fieldSchema.getElementType(), $macro.nextAssignTo, $macro.nextTmp, $macro.inUnion )
+	}
+	
+	${macro.assignTo} = ${macro.tmp}_array
+	
+#elseif( $fieldSchema.getType() == $MAP )
+#if( $inUnion )
+	${macro.tmp}_map := make([]interface{})
+#else
+	${macro.tmp}_map := make(map[string]${this.golangTypeDecl($schema, $fieldSchema.getValueType())})
+#end
+	for _, ${tmp}_k := range []string{"foo", "bar", "baz"} {
+#set( $macro.nextAssignTo = "${macro.tmp}_map[${macro.tmp}_k]" )
+#set( $macro.nextTmp = "${macro.tmp}_${fieldSchema.getValueType().getName()}" )
+#wrap_create_record($fieldSchema.getValueType(), $macro.nextAssignTo, $macro.nextTmp, $macro.inUnion )
+	}
+	
+	${macro.assignTo} = ${macro.tmp}_map
+	
+#elseif( $fieldSchema.getType() == $FIXED )
+	${assignTo} = new($recordType)
+	${assignTo}.Bytes = make([]byte, $fieldSchema.getFixedSize())
+	for ${macro.tmp}_i := 0; ${macro.tmp}_i < $fieldSchema.getFixedSize(); ${macro.tmp}_i++ {
+		${assignTo}.Bytes[${macro.tmp}_i] = byte(${macro.tmp}_i)
+	}
+#elseif( $fieldSchema.getType() == $UNION )
+	
+	switch runNumber % $macro.fieldSchema.getTypes().size() {
+#set( $i = 0 )
+#foreach($unionSchema in $macro.fieldSchema.getTypes())
+	case $i:
+#set( $macro.unionSchema = ${unionSchema} )
+#set( $macro.nextAssignTo = ${macro.assignTo} )
+#set( $macro.nextTmp = ${macro.tmp} )
+#wrap_create_record($macro.unionSchema, $macro.nextAssignTo, $macro.nextTmp, true )
+#set( $i = $i + 1 )
+#end
+	}
+	
+#elseif( $fieldSchema.getType() == $ENUM )
+#if( $inUnion )
+	${macro.tmp} := new($recordType)
+	${macro.tmp}.Value = 0
+	${assignTo} = ${macro.tmp}
+#else
+	${assignTo}.Value = 0
+#end
+#elseif( $fieldSchema.getType() == $STRING )
+	$assignTo = "random string"
+#elseif( $fieldSchema.getType() == $BYTES )
+	$assignTo = []byte("random bytes")
+#elseif( $fieldSchema.getType() == $INT )
+	$assignTo = rand.Int31()
+#elseif( $fieldSchema.getType() == $LONG )
+	$assignTo = rand.Int63()
+#elseif( $fieldSchema.getType() == $FLOAT )
+	$assignTo = rand.Float32()
+#elseif( $fieldSchema.getType() == $DOUBLE )
+	$assignTo = rand.Float64()
+#elseif( $fieldSchema.getType() == $BOOLEAN )
+	$assignTo = true
+#elseif( $fieldSchema.getType() == $NULL )
+	$assignTo = nil
+#else
+	$this.raiseError("Invalid type!")
+#end
+#end
+
+// creates a valid ${this.mangle($schema.getName())}
+func genRandom${this.mangle($schema.getName())}(runNumber int) (*${this.mangle($schema.getName())}) {
+	var original *${this.mangle($schema.getName())}
+#create_record( $schema, "original", "obj", false )
+	return original
+}
+
+#foreach( $run in [0..${this.testRuns($schema)}] )
+func Test${this.mangle($schema.getName())}_$run(t *testing.T) {
+	original := genRandom${this.mangle($schema.getName())}($run)
+	roundTrip${this.mangle($schema.getName())}(t, roundTrip${this.mangle($schema.getName())}(t, original, "run $run, pass 0"), "run $run, pass 1")
+}
+
+#end
+
+

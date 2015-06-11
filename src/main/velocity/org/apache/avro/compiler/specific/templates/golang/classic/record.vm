@@ -1,0 +1,291 @@
+##
+## Copyright (c) 2014 Raytheon BBN Technologies Corp. All rights reserved.
+##
+## Licensed to the Apache Software Foundation (ASF) under one
+## or more contributor license agreements.  See the NOTICE file
+## distributed with this work for additional information
+## regarding copyright ownership.  The ASF licenses this file
+## to you under the Apache License, Version 2.0 (the
+## "License"); you may not use this file except in compliance
+## with the License.  You may obtain a copy of the License at
+##
+##     http://www.apache.org/licenses/LICENSE-2.0
+##
+## Unless required by applicable law or agreed to in writing, software
+## distributed under the License is distributed on an "AS IS" BASIS,
+## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## See the License for the specific language governing permissions and
+## limitations under the License.
+##
+package ${this.golangPackageName($schema)};
+
+#set( $imports = $this.getImports($schema) )
+#if ($imports.size() > 0)
+import (
+#foreach ($import in $imports)
+	"$import"
+#end
+)
+#end
+import "errors"
+
+// ${this.mangle($schema.getName())}Schema is an AvroSchema object
+var ${this.mangle($schema.getName())}Schema = ${avroPackage}AvroRegisterSchema(${this.mangle($schema.getName())}FromRecord, "${this.javaEscape($schema.toString())}")
+
+#if ($schema.getDoc())
+/** $schema.getDoc() */
+#end
+type ${this.mangle($schema.getName())} struct {
+#foreach ($field in $schema.getFields())
+#if ($field.doc())
+	/** $field.doc() */
+#end
+	${this.generateFieldName($field, $schema)} ${this.golangTypeDecl($schema, $field.schema())} ${this.golangTypeDescription($field)}
+#end
+}
+
+// ToAvroContainer converts ${this.mangle($schema.getName())} to a byte array
+func (this *${this.mangle($schema.getName())}) ToAvroContainer() ([]byte, error) {
+	return ${avroPackage}ToAvroContainer([]${avroPackage}AvroObject{this})
+}
+
+// ToJSON converts ${this.mangle($schema.getName())} to a JSON string
+func (this *${this.mangle($schema.getName())}) ToJSON(prettyPrint bool) (string, error) {
+	record, err := this.ToRecord()
+	if err != nil {
+		return "", errors.New("ToJSON: " + err.Error())
+	}
+	return record.ToJSON(prettyPrint)
+}
+
+// ${this.mangle($schema.getName())}FromAvroContainer returns a slice
+// of ${this.mangle($schema.getName())} objects
+func ${this.mangle($schema.getName())}FromAvroContainer(bytes []byte) ([]${avroPackage}AvroObject, error) {
+	return ${avroPackage}FromAvroContainer(bytes, ${this.mangle($schema.getName())}Schema)
+}
+
+//
+// AvroObject interface; should not need to use these directly
+//
+
+// GetSchema returns the schema object associated with this type
+func (this *${this.mangle($schema.getName())}) GetSchema() *${avroPackage}AvroSchema {
+	return ${this.mangle($schema.getName())}Schema
+}
+
+## Adds whitespace
+#macro( wrap_from_record $fieldSchema $assignTo $record $tmp $p )
+$this.addPrefix("$p	", "#from_record($fieldSchema, $assignTo, $record, $tmp, ""$p	"" )")
+#end
+##
+## Recursive macro
+#macro( from_record $fieldSchema $assignTo $record $tmp $p )
+##
+## $macro is only needed for things used after a recursive call
+##
+#set( $recordType = ${this.golangType($schema, $fieldSchema)} )
+#set( $macro.assignTo = $assignTo )
+##
+#if( $fieldSchema.getType() == $RECORD || $fieldSchema.getType() == $FIXED )
+	$tmp, err := ${recordType}FromRecord(${record}.ToRecord())
+#elseif( $fieldSchema.getType() == $ARRAY )
+	${tmp} := ${record}
+	${tmp}_len := ${tmp}.GetArraySize()
+	${assignTo} = make([]${this.golangTypeDecl($schema, $fieldSchema.getElementType())} , ${tmp}_len)
+	
+	for ${tmp}_i := 0; ${tmp}_i < ${tmp}_len; ${tmp}_i++ {
+		
+		${tmp}_iter, err := ${tmp}.GetArrayElement(${tmp}_i)
+		if err != nil {
+			return nil, errors.New("get[${field.name()}]: " + err.Error())
+		}
+#set( $macro.nextAssignTo = "${assignTo}[${tmp}_i]" )
+#set( $macro.nextRecord = "${tmp}_iter" )
+#set( $macro.nextTmp = "${tmp}_${fieldSchema.getElementType().getName()}" )
+#wrap_from_record($fieldSchema.getElementType(), $macro.nextAssignTo, $macro.nextRecord, $macro.nextTmp, $p )
+	}
+#elseif( $fieldSchema.getType() == $MAP )
+	${tmp} := ${record}
+	${assignTo} = make(map[string]${this.golangTypeDecl($schema, $fieldSchema.getValueType())})
+	
+	for ${tmp}_i := 0; ${tmp}_i < ${tmp}.GetMapSize(); ${tmp}_i++ {
+		
+		${tmp}_k, ${tmp}_v, err := ${tmp}.GetMapElement(${tmp}_i)
+		if err != nil {
+			return nil, errors.New("get[${field.name()}]: " + err.Error())
+		}
+#set( $macro.nextAssignTo = "${assignTo}[${tmp}_k]" )
+#set( $macro.nextRecord = "${tmp}_v" )
+#set( $macro.nextTmp = "${tmp}_${fieldSchema.getValueType().getName()}" )	
+#wrap_from_record($fieldSchema.getValueType(), $macro.nextAssignTo, $macro.nextRecord, $macro.nextTmp, $p )
+	}
+#elseif( $fieldSchema.getType() == $UNION )
+	$assignTo, err = ${record}.GetUnion() 
+#elseif( $fieldSchema.getType() == $ENUM )
+	${assignTo}.Value, err = ${record}.GetEnum()
+#elseif( $fieldSchema.getType() == $STRING )
+	$assignTo, err = ${record}.GetString()
+#elseif( $fieldSchema.getType() == $BYTES )
+	$assignTo, err = ${record}.GetBytes()
+#elseif( $fieldSchema.getType() == $INT )
+	$assignTo, err = ${record}.GetInt()
+#elseif( $fieldSchema.getType() == $LONG )
+	$assignTo, err = ${record}.GetLong()
+#elseif( $fieldSchema.getType() == $FLOAT )
+	$assignTo, err = ${record}.GetFloat()
+#elseif( $fieldSchema.getType() == $DOUBLE )
+	$assignTo, err = ${record}.GetDouble()
+#elseif( $fieldSchema.getType() == $BOOLEAN )
+	$assignTo, err = ${record}.GetBoolean()
+#elseif( $fieldSchema.getType() == $NULL )
+	$assignTo, err = ${record}.GetNull()
+#else
+	$this.raiseError("Invalid type!")
+#end
+#if( $fieldSchema.getType() != $MAP && $fieldSchema.getType() != $ARRAY )
+	if err != nil {
+		return nil, errors.New("get[$structName]: " + err.Error())
+	}
+#end
+#if( $fieldSchema.getType() == $RECORD || $field.schema().getType() == $FIXED )
+	$assignTo = $tmp.(*$recordType) 
+#end
+#end
+
+func ${this.mangle($schema.getName())}FromRecord(record *${avroPackage}AvroRecord) (${avroPackage}AvroObject, error) {
+#if( $this.toRecordNeedsError($schema) )
+	var err error
+#end
+	obj := new(${this.mangle($schema.getName())})
+
+#foreach ($field in $schema.getFields())
+#set( $structName = ${this.generateFieldName($field, $schema)} )
+#from_record( ${field.schema()}, "obj.${structName}", "record.Get(""${field.name()}"")", "obj_${structName}", "" )
+#end
+	
+	return obj, nil
+}
+##
+##
+## Adds whitespace
+#macro( wrap_to_record $fieldSchema $assignTo $record $tmp $getGoSchema $p )
+$this.addPrefix("$p	", "#to_record($fieldSchema, $assignTo, $record, $tmp, $getGoSchema, ""$p	"")")
+#end
+##
+## Recursive macro
+##
+#macro( to_record $fieldSchema $assignTo $data $tmp $getGoSchema $p )
+##
+##
+## $macro is only needed for things used after a recursive call
+##
+#set( $recordType = ${this.golangType($schema, $fieldSchema)} )
+#set( $macro.assignTo = $assignTo )
+#set( $macro.tmp = ${tmp} )
+#set( $macro.goSchemaType = ${this.getSchemaGoType($schema, $fieldSchema)} )
+##
+##
+#if( $fieldSchema.getType() == $RECORD || $fieldSchema.getType() == $FIXED )
+
+	${tmp}_rec, err := ${data}.ToRecord()
+	if err != nil {
+		return nil, errors.New("set[${field.name()}]: " + err.Error())
+	}
+	$assignTo, err := ${avroPackage}DatumFromRecord(${tmp}_rec)
+	
+#elseif( $fieldSchema.getType() == $ARRAY )
+	
+	${tmp}_schema := ${getGoSchema}
+	${tmp}_array, err := ${avroPackage}DatumArray(${tmp}_schema)
+	
+	for ${tmp}_i := 0; ${tmp}_i < len(${data}); ${tmp}_i++ {
+
+#set( $macro.nextAssignTo = "${tmp}_v" )
+#set( $macro.nextRecord = "${data}[${tmp}_i]" )
+#set( $macro.nextTmp = "${tmp}_${fieldSchema.getElementType().getName()}" )
+#set( $macro.nextGetGoSchema = "${tmp}_schema.GetArraySchema()" )
+#wrap_to_record($fieldSchema.getElementType(), $macro.nextAssignTo, $macro.nextRecord, $macro.nextTmp, $macro.nextGetGoSchema, $p )
+		
+		if err != nil {
+			return nil, errors.New("set[${field.name()}]: " + err.Error())
+		}
+		
+		if err = ${macro.tmp}_array.Append(${macro.tmp}_v); err != nil {
+			return nil, errors.New("set[${field.name()}]append: " + err.Error())
+		}
+	}
+	
+	$macro.assignTo, err := ${macro.tmp}_array.ToDatum()
+	
+#elseif( $fieldSchema.getType() == $MAP )
+
+	${tmp}_schema := ${getGoSchema}
+	${tmp}_map, err := ${avroPackage}DatumMap(${tmp}_schema)
+	
+	for ${tmp}_k, ${tmp}_v := range ${data} {
+
+#set( $macro.nextAssignTo = "${tmp}_val" )
+#set( $macro.nextRecord = "${tmp}_v" )
+#set( $macro.nextTmp = "${tmp}_${fieldSchema.getValueType().getName()}" )
+#set( $macro.nextGetGoSchema = "${tmp}_schema.GetMapSchema()" )
+#wrap_to_record($fieldSchema.getValueType(), $macro.nextAssignTo, $macro.nextRecord, $macro.nextTmp, $macro.nextGetGoSchema, $p )
+		if err != nil {
+			return nil, errors.New("set[${field.name()}]: " + err.Error())
+		}
+		
+		if err = ${macro.tmp}_map.Set(${macro.tmp}_k, ${macro.tmp}_val); err != nil {
+			return nil, errors.New("set[${field.name()}]mapset: " + err.Error())
+		}
+	}
+	
+	$macro.assignTo, err := ${macro.tmp}_map.ToDatum()
+	
+#elseif( $fieldSchema.getType() == $UNION )
+	$assignTo, err := ${avroPackage}DatumFromUnion(${getGoSchema}, ${data})
+#elseif( $fieldSchema.getType() == $ENUM )
+	$assignTo, err := ${avroPackage}DatumFromEnum($macro.goSchemaType, ${data}.Value)
+#elseif( $fieldSchema.getType() == $STRING )
+	$assignTo, err := ${avroPackage}DatumFromString(${data})
+#elseif( $fieldSchema.getType() == $BYTES )
+	$assignTo, err := ${avroPackage}DatumFromBytes(${data})
+#elseif( $fieldSchema.getType() == $INT )
+	$assignTo, err := ${avroPackage}DatumFromInt(${data})
+#elseif( $fieldSchema.getType() == $LONG )
+	$assignTo, err := ${avroPackage}DatumFromLong(${data})
+#elseif( $fieldSchema.getType() == $FLOAT )
+	$assignTo, err := ${avroPackage}DatumFromFloat(${data})
+#elseif( $fieldSchema.getType() == $DOUBLE )
+	$assignTo, err := ${avroPackage}DatumFromDouble(${data})
+#elseif( $fieldSchema.getType() == $BOOLEAN )
+	$assignTo, err := ${avroPackage}DatumFromBoolean(${data})
+#elseif( $fieldSchema.getType() == $NULL )
+	$assignTo, err := ${avroPackage}DatumFromNull()
+#else
+	$this.raiseError("Invalid type!")
+#end
+#end
+
+
+
+func (this *${this.mangle($schema.getName())}) ToRecord() (*${avroPackage}AvroRecord, error) {
+	record := this.GetSchema().CreateRecord()
+	
+#foreach ($field in $schema.getFields())
+#set( $recordType = ${this.golangType($schema, $field.schema())} )
+#set( $structName = ${this.generateFieldName($field, $schema)} )
+#set( $tmpRecord = "obj_${structName}" )
+
+#to_record( ${field.schema()}, "${tmpRecord}", "this.${structName}", "${tmpRecord}", "this.GetSchema().GetFieldSchemaUnsafe(""${field.name()}"")", "" )
+
+#if( ${field.schema().getType()} != $MAP && ${field.schema().getType()} != $ARRAY )
+	if err != nil {
+		return nil, errors.New("set[$field.name()]: " + err.Error())
+	}
+#end
+	if err = record.Set("$field.name()", ${tmpRecord}); err != nil {
+		return nil, err
+	}
+	
+#end
+	return record, nil
+}

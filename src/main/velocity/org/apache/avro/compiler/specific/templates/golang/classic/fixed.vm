@@ -1,0 +1,84 @@
+##
+## Copyright (c) 2014 Raytheon BBN Technologies Corp
+##
+## Licensed under the Apache License, Version 2.0 (the "License");
+## you may not use this file except in compliance with the License.
+## You may obtain a copy of the License at
+##
+##   http://www.apache.org/licenses/LICENSE-2.0
+##
+## Unless required by applicable law or agreed to in writing, software
+## distributed under the License is distributed on an "AS IS" BASIS,
+## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## See the License for the specific language governing permissions and
+## limitations under the License.
+##
+package ${this.golangPackageName($schema)};
+
+#set( $imports = $this.getImports($schema) )
+#if ($imports.size() > 0)
+import (
+#foreach ($import in $imports)
+	"$import"
+#end
+)
+import "errors"
+
+#end
+// ${this.mangle($schema.getName())}Schema is an AvroSchema object
+var ${this.mangle($schema.getName())}Schema = ${avroPackage}AvroRegisterSchema(${this.mangle($schema.getName())}FromRecord, ${this.javaSplit($schema.toString())})
+
+#if ($schema.getDoc())
+/** $schema.getDoc() */
+#end
+type ${this.mangle($schema.getName())} struct {
+	Bytes []byte // length $schema.getFixedSize()
+}
+
+// ToAvroContainer converts ${this.mangle($schema.getName())} to a byte array
+func (this *${this.mangle($schema.getName())}) ToAvroContainer() ([]byte, error) {
+	return ${avroPackage}ToAvroContainer([]${avroPackage}AvroObject{this})
+}
+
+// ToJSON converts ${this.mangle($schema.getName())} to a JSON string
+func (this *${this.mangle($schema.getName())}) ToJSON(prettyPrint bool) (string, error) {
+	record, err := this.ToRecord()
+	if err != nil {
+		return "", errors.New("ToJSON: " + err.Error())
+	}
+	return record.ToJSON(prettyPrint)
+}
+
+// ${this.mangle($schema.getName())}FromAvroContainer returns a slice
+// of ${this.mangle($schema.getName())} objects from a byte array
+func ${this.mangle($schema.getName())}FromAvroContainer(bytes []byte) ([]${avroPackage}AvroObject, error) {
+	return ${avroPackage}FromAvroContainer(bytes, ${this.mangle($schema.getName())}Schema)
+}
+
+//
+// AvroObject interface; should not need to use these directly
+//
+
+func (this *${this.mangle($schema.getName())}) GetSchema() *${avroPackage}AvroSchema {
+	return ${this.mangle($schema.getName())}Schema
+}
+
+func ${this.mangle($schema.getName())}FromRecord(record *${avroPackage}AvroRecord) (${avroPackage}AvroObject, error) {
+	var err error
+	obj := new(${this.mangle($schema.getName())})
+	obj.Bytes, err = record.GetFixed()
+	if err != nil {
+		return nil, errors.New("${this.mangle($schema.getName())}: " + err.Error())
+	}
+	return obj, nil
+}
+
+func (this *${this.mangle($schema.getName())}) ToRecord() (*${avroPackage}AvroRecord, error) {
+	
+	record, err := ${avroPackage}RecordFromFixed(this.GetSchema(), this.Bytes)
+	if err != nil {
+		return nil, errors.New("${this.mangle($schema.getName())}: " + err.Error())
+	}
+
+	return record, nil
+}
