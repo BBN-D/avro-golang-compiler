@@ -7,6 +7,8 @@ serialize/deserialize Avro objects.
 
 This generates code from .avdl files, as documented [here](http://avro.apache.org/docs/1.7.7/idl.html).
 
+An example of the generated code can be found on [github](https://github.com/BBN-D/avro-golang-example).
+
 Requirements
 ============
 
