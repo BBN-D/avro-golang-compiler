@@ -120,11 +120,12 @@ $this.addPrefix("	", "#create_record($fieldSchema, $assignTo, $tmp, $inUnion)")
 	${macro.assignTo} = ${macro.tmp}_map
 	
 #elseif( $fieldSchema.getType() == $FIXED )
-	${assignTo} = new($recordType)
-	${assignTo}.Bytes = make([]byte, $fieldSchema.getFixedSize())
+	${macro.tmp} := new($recordType)
+	${macro.tmp}.Bytes = make([]byte, $fieldSchema.getFixedSize())
 	for ${macro.tmp}_i := 0; ${macro.tmp}_i < $fieldSchema.getFixedSize(); ${macro.tmp}_i++ {
-		${assignTo}.Bytes[${macro.tmp}_i] = byte(${macro.tmp}_i)
+		${macro.tmp}.Bytes[${macro.tmp}_i] = byte(${macro.tmp}_i)
 	}
+	${assignTo} = ${macro.tmp}
 #elseif( $fieldSchema.getType() == $UNION )
 	
 	switch runNumber % $macro.fieldSchema.getTypes().size() {
